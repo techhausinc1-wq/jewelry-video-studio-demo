@@ -303,13 +303,31 @@
         <div class="studio-panel">
           <div class="field">
             <label class="field-label">1. Piece type</label>
-            <select id="studio-category">
+            <select id="studio-category" onchange="onCategoryChange()">
               <option>Ring</option>
               <option>Necklace</option>
               <option>Bracelet</option>
               <option>Earrings</option>
               <option>Watch</option>
             </select>
+          </div>
+
+          <div class="field">
+            <label class="field-label">Model</label>
+            <div style="display:flex; gap:10px;">
+              <div id="hand-style-wrap" style="flex:1;">
+                <select id="studio-hand-style">
+                  <option value="feminine">Feminine hand</option>
+                  <option value="masculine">Masculine hand</option>
+                </select>
+              </div>
+              <select id="studio-skin-tone" style="flex:1;">
+                <option value="light">Light skin tone</option>
+                <option value="medium" selected>Medium skin tone</option>
+                <option value="tan">Tan skin tone</option>
+                <option value="deep">Deep skin tone</option>
+              </select>
+            </div>
           </div>
 
           <div class="field">
@@ -777,6 +795,15 @@
   dz.addEventListener('dragleave', () => dz.classList.remove('dragover'));
   dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('dragover'); handleStudioFiles(e.dataTransfer.files); });
 
+  // Hand style only makes sense for pieces actually worn on a hand/wrist —
+  // hide it for Necklace/Earrings rather than show a control with no effect.
+  function onCategoryChange() {
+    const category = document.getElementById('studio-category').value;
+    const appliesTo = ['Ring', 'Bracelet', 'Watch'];
+    document.getElementById('hand-style-wrap').style.display = appliesTo.includes(category) ? '' : 'none';
+  }
+  onCategoryChange();
+
   function handleStudioFiles(fileList) {
     const files = Array.from(fileList || []).slice(0, 5 - studioPhotos.length);
     files.forEach(file => {
@@ -816,12 +843,14 @@
     setProgressStep('step-upload', 'current');
 
     const category = document.getElementById('studio-category').value;
+    const skinTone = document.getElementById('studio-skin-tone').value;
+    const handStyle = document.getElementById('studio-hand-style').value;
 
     try {
       const startRes = await fetch(WORKER_URL + '/generate/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Access-Code': WORKER_AUTH },
-        body: JSON.stringify({ imageBase64s: studioPhotos.map(p => p.dataUrl), category }),
+        body: JSON.stringify({ imageBase64s: studioPhotos.map(p => p.dataUrl), category, skinTone, handStyle }),
       });
       if (!startRes.ok) {
         const errBody = await startRes.json().catch(() => ({}));
