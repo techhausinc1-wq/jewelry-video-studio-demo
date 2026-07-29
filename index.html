@@ -366,6 +366,7 @@
             <video id="studio-result-video" controls loop></video>
             <div style="display:flex; gap:10px; margin-top:14px;">
               <a class="btn primary" id="studio-download-link" download="jewelry-video.mp4">Download video</a>
+              <button type="button" class="btn ghost" onclick="shareVideo(activeShareVideoId)">📤 Share…</button>
               <button class="btn ghost" onclick="resetStudio()">Start another</button>
             </div>
             <div style="margin-top:18px; padding-top:16px; border-top:1px solid var(--line);">
@@ -526,6 +527,34 @@
         <button type="submit" class="btn primary">Add employee</button>
       </div>
     </form>
+  </div>
+</div>
+
+<!-- ============ VIDEO PREVIEW / SHARE MODAL ============ -->
+<div class="modal-overlay" id="video-modal">
+  <div class="modal">
+    <div class="modal-head">
+      <div class="modal-title" id="video-modal-title">Video</div>
+      <span class="modal-close" onclick="closeModal('video-modal')">&times;</span>
+    </div>
+    <video id="video-modal-player" controls loop style="width:100%; border-radius:8px; background:#000; aspect-ratio:9/16; object-fit:cover;"></video>
+    <div style="display:flex; gap:10px; margin-top:14px;">
+      <a class="btn primary" id="video-modal-download" download="lounge4diamonds-video.mp4">Download video</a>
+      <button type="button" class="btn ghost" onclick="shareVideo(activeShareVideoId)">📤 Share…</button>
+    </div>
+    <div style="margin-top:18px; padding-top:16px; border-top:1px solid var(--line);">
+      <label class="field-label">Caption</label>
+      <textarea id="video-modal-caption" rows="4" readonly style="font-size:13px;"></textarea>
+      <button type="button" class="btn sm" style="margin-top:8px;" onclick="copyModalCaption()">Copy caption</button>
+    </div>
+    <div style="margin-top:16px; padding-top:16px; border-top:1px solid var(--line);">
+      <label class="field-label">Or share a link directly</label>
+      <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
+        <a class="btn sm" id="video-modal-whatsapp" target="_blank" rel="noopener">WhatsApp</a>
+        <a class="btn sm" id="video-modal-email" target="_blank" rel="noopener">Email</a>
+        <button type="button" class="btn sm" onclick="copyVideoLink(activeShareVideoId)">Copy link</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -728,7 +757,7 @@
 
     const recent = state.videos.slice(0, 4);
     document.getElementById('dash-recent-videos').innerHTML = recent.length ? recent.map(v => `
-      <div class="row">
+      <div class="row" style="cursor:pointer;" onclick="openVideoModal('${v.id}')">
         <div class="row-body">
           <div class="row-name">${esc(v.category)}</div>
           <div class="row-meta">${esc(v.createdAtLabel)}</div>
@@ -789,6 +818,9 @@
 
   // ============ STUDIO ============
   let studioPhotos = [];
+  // Shared by the post-generation result panel and the video preview modal —
+  // whichever video's Share/Copy-link buttons were most recently shown.
+  let activeShareVideoId = null;
   document.getElementById('studio-file-input').addEventListener('change', (e) => handleStudioFiles(e.target.files));
   const dz = document.getElementById('drop-zone');
   dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('dragover'); });
@@ -910,6 +942,7 @@
     const notes = document.getElementById('studio-notes').value.trim();
     state.videos.unshift({ id: jobId, category, videoUrl, notes, createdAt: Date.now(), createdAtLabel: nowStamp() });
     saveState();
+    activeShareVideoId = jobId;
     document.getElementById('studio-result-video').src = videoUrl;
     document.getElementById('studio-download-link').href = videoUrl;
     document.getElementById('studio-caption-output').value = buildCaption(category, notes);
@@ -918,6 +951,61 @@
     renderLibrary();
     renderDashboard();
     toast('Video ready');
+  }
+
+  // ============ VIDEO PREVIEW / SHARE ============
+  function openVideoModal(videoId) {
+    const v = state.videos.find(x => x.id === videoId);
+    if (!v) return;
+    activeShareVideoId = videoId;
+    document.getElementById('video-modal-title').textContent = v.category + ' — ' + v.createdAtLabel;
+    document.getElementById('video-modal-player').src = v.videoUrl;
+    document.getElementById('video-modal-download').href = v.videoUrl;
+    const caption = buildCaption(v.category, v.notes);
+    document.getElementById('video-modal-caption').value = caption;
+    const shareText = encodeURIComponent(caption + '\n\n' + v.videoUrl);
+    document.getElementById('video-modal-whatsapp').href = 'https://wa.me/?text=' + shareText;
+    document.getElementById('video-modal-email').href = 'mailto:?subject=' + encodeURIComponent('New piece from ' + (state.businessName || 'Lounge4Diamonds')) + '&body=' + shareText;
+    openModal('video-modal');
+  }
+  function copyModalCaption() {
+    const ta = document.getElementById('video-modal-caption');
+    ta.select();
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(ta.value).then(() => toast('Caption copied')).catch(() => toast('Select the text to copy manually'));
+    } else {
+      toast('Select the text to copy manually');
+    }
+  }
+  function copyVideoLink(videoId) {
+    const v = state.videos.find(x => x.id === videoId);
+    if (!v) return;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(v.videoUrl).then(() => toast('Video link copied')).catch(() => toast('Could not copy — select the link manually'));
+    } else {
+      toast('Could not copy — select the link manually');
+    }
+  }
+  async function shareVideo(videoId) {
+    const v = state.videos.find(x => x.id === videoId);
+    if (!v) { toast('Generate a video first'); return; }
+    const caption = buildCaption(v.category, v.notes);
+    let file = null;
+    try {
+      const res = await fetch(v.videoUrl);
+      const blob = await res.blob();
+      file = new File([blob], 'lounge4diamonds-' + v.id + '.mp4', { type: 'video/mp4' });
+    } catch (_) { /* fall through to link-based sharing below */ }
+    const shareData = { text: caption, title: state.businessName || 'Lounge4Diamonds' };
+    if (file && navigator.canShare && navigator.canShare({ files: [file] })) shareData.files = [file];
+    if (navigator.share) {
+      try { await navigator.share(shareData); toast('Shared'); return; }
+      catch (e) { if (e.name === 'AbortError') return; /* user cancelled — silent */ }
+    }
+    // Desktop fallback — no native share sheet: bundle caption + link, open the modal's link row.
+    try { await navigator.clipboard.writeText(caption + '\n\n' + v.videoUrl); } catch (_) {}
+    openVideoModal(videoId);
+    toast('Caption + link copied — use WhatsApp/Email below, or download and post directly.');
   }
 
   // ============ CAPTION GENERATOR ============
@@ -979,7 +1067,7 @@
   function renderLibrary() {
     const grid = document.getElementById('library-grid');
     grid.innerHTML = state.videos.length ? state.videos.map(v => `
-      <div class="library-item">
+      <div class="library-item" style="cursor:pointer;" onclick="openVideoModal('${v.id}')">
         <video src="${v.videoUrl}" muted loop onmouseover="this.play()" onmouseout="this.pause()"></video>
         <div class="library-item-meta">${esc(v.category)} &middot; ${esc(v.createdAtLabel)}</div>
       </div>
