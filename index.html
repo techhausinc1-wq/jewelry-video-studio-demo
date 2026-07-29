@@ -868,15 +868,35 @@
 
   async function pollJob(jobId) {
     const maxAttempts = 90; // ~ 3 minutes at 2s interval, generous for video gen
+    // Jobs live for an hour (KOSTYA_JOB_TTL_MS), so a "not found" this early is
+    // almost always transient KV read lag right after a deploy, not a real
+    // expired job — tolerate a run of misses instead of failing on the first one.
+    const maxConsecutiveMisses = 6; // ~12s of persistent absence before giving up
+    let consecutiveMisses = 0;
     for (let i = 0; i < maxAttempts; i++) {
       await new Promise(r => setTimeout(r, 2000));
-      const res = await fetch(WORKER_URL + '/generate/status/' + jobId, {
-        headers: { 'X-Access-Code': WORKER_AUTH },
-      });
+      let res;
+      try {
+        res = await fetch(WORKER_URL + '/generate/status/' + jobId, {
+          headers: { 'X-Access-Code': WORKER_AUTH },
+        });
+      } catch (e) {
+        consecutiveMisses++;
+        if (consecutiveMisses >= maxConsecutiveMisses) throw new Error('Lost connection while checking progress: ' + e.message);
+        continue;
+      }
       if (!res.ok) {
         const errBody = await res.json().catch(() => ({}));
+        if (res.status === 404) {
+          consecutiveMisses++;
+          if (consecutiveMisses >= maxConsecutiveMisses) {
+            throw new Error(errBody.error || 'Status check failed (404)');
+          }
+          continue;
+        }
         throw new Error(errBody.error || ('Status check failed (' + res.status + ')'));
       }
+      consecutiveMisses = 0;
       const status = await res.json();
       if (status.stage === 'image_done' || status.stage === 'video_pending') {
         setProgressStep('step-image', 'done');
